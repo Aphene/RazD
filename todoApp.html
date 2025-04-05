@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- IMPORTANT: Content Security Policy -->
+    <!-- Allows scripts from the same origin ('self') and inline scripts ('unsafe-inline'). -->
+    <!-- For production, remove 'unsafe-inline' and move the script below to a separate .js file. -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';">
+    <title>Razd Todo App with Grid</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background-color: #f4f4f4;
+            margin-top: 20px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            background-color: white;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Razd Todo App</h1>
+    <canvas id="todoCanvas" width="400" height="500">
+        Your browser does not support the HTML canvas tag.
+    </canvas>
+
+    <!-- Load modular Razd framework -->
+    <!-- Base classes -->
+    <script src="RazdElement.js"></script>
+    <script src="razd-core.js"></script>
+    
+    <!-- Element classes -->
+    <script src="TextElement.js"></script>
+    <script src="ButtonElement.js"></script>
+    <script src="PanelElement.js"></script>
+    <script src="BookElement.js"></script>
+    <script src="TextInputElement.js"></script>
+    <script src="PasswordInputElement.js"></script>
+    <script src="ImageElement.js"></script>
+    <script src="GridElement.js"></script>
+
+    <!-- Application Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvasId = 'todoCanvas';
+            const canvas = document.getElementById(canvasId);
+            if (!canvas || !RazD) {
+                console.error("Canvas or RazD class not found!");
+                return;
+            }
+
+            // Global variables to store UI elements
+            let razdInstance;
+            let newTaskInput;
+            let addTaskButton;
+            let taskListGrid = null;
+            const taskListGridId = 'taskListGrid';
+
+            // --- UI Update Function ---
+            function updateTaskListUI() {
+                const currentTasks = razdInstance.state.tasks || [];
+
+                // 1. Prepare items for the Grid
+                const gridItems = currentTasks.map((task, index) => ({
+                    // Data for drawing the row
+                    id: task.id, // Keep task id if needed elsewhere
+                    text: task.text,
+                    font: '14px sans-serif',
+                    textColor: '#333',
+
+                    // Configuration for the "button" within this row
+                    buttonText: 'X', // Use 'X' for delete button
+                    buttonWidth: 25,
+                    buttonHeight: 20,
+                    buttonFill: '#d9534f', // Reddish delete button
+                    buttonTextColor: 'white',
+                    buttonStroke: '#d43f3a',
+                    buttonFont: 'bold 12px sans-serif',
+
+                    // CRUCIAL: Assign the event handler for this specific item
+                    // This function will be called by the Grid's internal handler
+                    onClick: deleteTask
+                }));
+
+                // 2. Find or Create Grid Element
+                if (!taskListGrid) {
+                    // Find if it exists from a previous state perhaps
+                    taskListGrid = razdInstance.getElementById(taskListGridId);
+                }
+
+                if (taskListGrid) {
+                    // Update existing grid's items and row count
+                    taskListGrid.options.items = gridItems;
+                    taskListGrid.options.rows = gridItems.length || 1; // Update row count
+                    // Optional: Recalculate cell height if necessary, or set fixed
+                    taskListGrid.options.cellHeight = 35; // Example fixed height
+                    taskListGrid.height = taskListGrid.options.cellHeight * (gridItems.length || 1); // Adjust grid height
+                } else {
+                    // Create the Grid for the first time or if it was removed
+                    const gridY = 70; // Position below input/button
+                    const gridHeight = 35 * (gridItems.length || 1); // Calculate height based on items
+                    
+                    taskListGrid = new GridElement(
+                        20, gridY, 360, Math.max(35, gridHeight), 
+                        taskListGridId, '', razdInstance.app.defaultStyle, null, null, null
+                    );
+                    
+                    // Set grid properties
+                    taskListGrid.data = gridItems;
+                    
+                    // Create template panel for the grid
+                    const templatePanel = new PanelElement(
+                        0, 0, 360, 35, 
+                        'taskTemplate', '', razdInstance.app.defaultStyle, taskListGrid, null, null
+                    );
+                    
+                    // Create text element for the task
+                    const taskText = new TextElement(
+                        10, 10, 300, 20, 
+                        'taskItemText', '{text}', razdInstance.app.defaultStyle, templatePanel, null, null
+                    );
+                    
+                    // Create delete button for each task
+                    const deleteBtn = new ButtonElement(
+                        320, 8, 25, 20, 
+                        'deleteBtn', 'X', razdInstance.app.defaultStyle, templatePanel, deleteTask, null
+                    );
+                    
+                    // Style the delete button
+                    if (deleteBtn.style) {
+                        deleteBtn.style.backgroundColor = '#d9534f';
+                        deleteBtn.style.foregroundColor = 'white';
+                        deleteBtn.style.borderColor = '#d43f3a';
+                        deleteBtn.style.fontWeight = 'bold';
+                    }
+                    
+                    // Add template to grid
+                    razdInstance.AddTemplateToGrid(taskListGrid, templatePanel);
+                    
+                    // Populate grid with data
+                    razdInstance.PopulateGrid(taskListGrid, gridItems);
+                    
+                    // Add the grid to the global elements
+                    razdInstance.addElement(taskListGrid);
+                }
+
+                // Ensure Razd knows a redraw is needed
+                razdInstance.draw();
+            }
+
+            // --- Event Handlers ---
+            function addTask() {
+                const text = razdInstance.state.newTask.trim();
+                if (text) {
+                    const newTask = {
+                        id: Date.now(), // Simple unique ID
+                        text: text
+                    };
+                    // Update state using setState to trigger redraw
+                    razdInstance.setState({
+                        tasks: [...razdInstance.state.tasks, newTask],
+                        newTask: '' // Clear input field state
+                    });
+
+                    // Update the input element's value directly (since state change won't automatically reflect back)
+                    const inputElement = razdInstance.getElementById('newTaskInput');
+                    if (inputElement) {
+                        inputElement.text = '';
+                        inputElement.cursorPos = 0; // Reset cursor too
+                    }
+
+                    updateTaskListUI(); // Update the grid display
+                } else {
+                    console.log("Task cannot be empty.");
+                    // Optional: Add visual feedback like shaking the input or showing a message
+                }
+            }
+
+            function deleteTask(event) {
+                // Get the index from the grid element
+                const indexToDelete = event.gridIndex !== undefined ? event.gridIndex : 
+                    (this.gridIndex !== undefined ? this.gridIndex : -1);
+
+                console.log(`Attempting to delete task at grid index: ${indexToDelete}`);
+
+                if (typeof indexToDelete === 'number' && indexToDelete >= 0) {
+                    let currentTasks = [...razdInstance.state.tasks]; // Create a new array copy
+                    if(indexToDelete < currentTasks.length) {
+                        currentTasks.splice(indexToDelete, 1); // Remove the task
+
+                        // Update state
+                        razdInstance.setState({ tasks: currentTasks });
+                        updateTaskListUI(); // Update the grid display
+                    } else {
+                        console.error(`Error: gridIndex ${indexToDelete} is out of bounds for tasks array (length ${currentTasks.length})`);
+                    }
+                } else {
+                    console.error("deleteTask called but gridIndex is missing or invalid!", event);
+                }
+            }
+
+            // --- Create UI Elements ---
+            function createUIElements() {
+                // Create input field
+                newTaskInput = new TextInputElement(
+                    20, 20, 280, 30, 'newTaskInput', '', 
+                    razdInstance.app.defaultStyle, null, null, null
+                );
+                
+                // Add placeholder text
+                newTaskInput.placeholder = 'Enter new task...';
+                
+                // Update state as user types
+                newTaskInput.onKeyDown = function(event) {
+                    // First, call the default text input key handler
+                    if (typeof this._handleKeyDown === 'function') {
+                        this._handleKeyDown(event);
+                    }
+                    // Then update the global state
+                    razdInstance.setState({ newTask: this.text });
+                };
+
+                // Create add button
+                addTaskButton = new ButtonElement(
+                    310, 20, 70, 30, 'addTaskButton', 'Add',
+                    razdInstance.app.defaultStyle, null, addTask, null
+                );
+                
+                // Custom button styling
+                if (addTaskButton.style) {
+                    addTaskButton.style.backgroundColor = '#5cb85c';
+                    addTaskButton.style.foregroundColor = 'white';
+                    addTaskButton.style.borderColor = '#4cae4c';
+                }
+            }
+
+            // --- Initialization ---
+            function init() {
+                console.log("Initializing RazD Todo App...");
+                
+                // Create an instance of RazD
+                razdInstance = new RazD();
+                
+                // Initialize the instance
+                razdInstance.init();
+                
+                // Set up initial application state
+                razdInstance.state = {
+                    tasks: [
+                        { id: Date.now() + 1, text: "Learn Razd Framework" },
+                        { id: Date.now() + 2, text: "Use the Grid element" },
+                        { id: Date.now() + 3, text: "Build awesome UI" }
+                    ],
+                    newTask: '' // Value for the input field
+                };
+                
+                // Create UI elements now that we have an initialized instance
+                createUIElements();
+                
+                // Add the static elements to the application
+                razdInstance.addElement(newTaskInput);
+                razdInstance.addElement(addTaskButton);
+                
+                // Perform initial drawing of the task list
+                updateTaskListUI();
+                
+                console.log("RazD Elements:", global.elements);
+                console.log("Todo App Initialized.");
+            }
+
+            // Run initialization
+            init();
+
+        }); // End DOMContentLoaded
+    </script>
+</body>
+</html>
